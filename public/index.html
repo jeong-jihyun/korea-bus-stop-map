@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>버스 정류장 찾기</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+  /* 레이아웃: 위에 검색줄, 가운데 지도, 아래(넓은 화면은 오른쪽)에 가까운 순 목록 */
+  :root {
+    --ink: #14213d;      /* 짙은 남색: 글자, 헤더 */
+    --paper: #f6f7f4;    /* 배경 */
+    --line: #d9dcd3;     /* 구분선 */
+    --signal: #0b6bcb;   /* 간선버스 파랑: 주요 버튼 */
+    --stop: #e8590c;     /* 정류장 표지판 주황 */
+    --muted: #5b6475;
+    --font: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: var(--font); color: var(--ink); background: var(--paper); display: flex; flex-direction: column; }
+  header { background: var(--ink); color: #fff; padding: 12px 16px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; flex: 1 1 320px; }
+  input, select, button { font: inherit; border-radius: 6px; border: 1px solid transparent; padding: 9px 12px; }
+  #bus { flex: 1 1 120px; min-width: 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  select { background: #fff; color: var(--ink); }
+  button.go { background: var(--signal); color: #fff; font-weight: 700; cursor: pointer; }
+  button.go:disabled { opacity: .6; cursor: progress; }
+  button.loc { background: transparent; color: #fff; border-color: #ffffff66; cursor: pointer; }
+  :focus-visible { outline: 3px solid #ffd43b; outline-offset: 2px; }
+  .notice { padding: 8px 16px; font-size: 13px; background: #fff3bf; color: #5c4400; }
+  .notice[hidden] { display: none; }
+  .notice.err { background: #ffe3e3; color: #8a1c1c; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-rows: 1fr minmax(120px, 36%); }
+  #map { min-height: 200px; }
+  aside { overflow: auto; border-top: 1px solid var(--line); background: #fff; }
+  aside h2 { font-size: 13px; margin: 0; padding: 10px 16px; color: var(--muted); font-weight: 500; position: sticky; top: 0; background: #fff; border-bottom: 1px solid var(--line); }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li button { width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 11px 16px; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; }
+  li button:hover, li button.on { background: #eef4fb; }
+  .nm { font-weight: 500; }
+  .sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dist { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .empty { padding: 16px; color: var(--muted); font-size: 14px; }
+  .pin { width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--stop); border: 2px solid #fff; box-shadow: 0 1px 4px #0006; }
+  .pin.me { background: var(--signal); border-radius: 50%; transform: none; }
+  @media (min-width: 860px) {
+    main { grid-template-rows: none; grid-template-columns: 1fr 340px; }
+    aside { border-top: 0; border-left: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>버스 정류장 찾기</h1>
+  <form id="f">
+    <input id="bus" inputmode="numeric" autocomplete="off" placeholder="버스 번호 (예: 472)" value="472" aria-label="버스 번호">
+    <select id="radius" aria-label="검색 반경">
+      <option value="500">반경 500m</option>
+      <option value="1000" selected>반경 1km</option>
+      <option value="2000">반경 2km</option>
+      <option value="3000">반경 3km</option>
+    </select>
+    <button class="go" id="go" type="submit">찾기</button>
+    <button class="loc" id="loc" type="button">내 위치</button>
+  </form>
+</header>
+<div class="notice" id="notice" hidden></div>
+<main>
+  <div id="map" role="application" aria-label="지도"></div>
+  <aside>
+    <h2 id="title">버스 번호를 입력하고 찾기를 누르세요</h2>
+    <ul id="list"></ul>
+    <div class="empty" id="hint">지도를 클릭하면 그 지점이 검색 중심이 돼요.</div>
+  </aside>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  var CITY_HALL = [37.5665, 126.9780];
+  var center = CITY_HALL.slice();
+
+  var map = L.map('map').setView(center, 15);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  var meMarker = L.marker(center, { icon: L.divIcon({ className: '', html: '<div class="pin me"></div>', iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(map);
+  var radiusCircle = null;
+  var stopLayer = L.layerGroup().addTo(map);
+  var markers = {};
+
+  var $ = function (id) { return document.getElementById(id); };
+  function notice(msg, isErr) {
+    var n = $('notice');
+    if (!msg) { n.hidden = true; return; }
+    n.textContent = msg; n.className = 'notice' + (isErr ? ' err' : ''); n.hidden = false;
+  }
+  function setCenter(ll, pan) {
+    center = ll; meMarker.setLatLng(ll);
+    if (pan) map.setView(ll, 15);
+  }
+
+  // 지도를 클릭하면 그 자리가 검색 중심
+  map.on('click', function (e) { setCenter([e.latlng.lat, e.latlng.lng], false); notice('검색 중심을 옮겼어요. 다시 "찾기"를 눌러 주세요.'); });
+
+  function locate() {
+    if (!navigator.geolocation) { notice('이 브라우저는 위치 기능을 지원하지 않아요. 지도를 클릭해 위치를 정하세요.', true); return; }
+    navigator.geolocation.getCurrentPosition(function (p) {
+      setCenter([p.coords.latitude, p.coords.longitude], true); notice('');
+    }, function () {
+      notice('위치 권한이 없어서 서울시청 기준으로 보여드려요. 지도를 클릭해 위치를 바꿀 수 있어요.', true);
+    }, { enableHighAccuracy: true, timeout: 8000 });
+  }
+  $('loc').addEventListener('click', locate);
+
+  function render(data, radius) {
+    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = '';
+    if (radiusCircle) map.removeLayer(radiusCircle);
+    radiusCircle = L.circle(center, { radius: radius, color: '#0b6bcb', weight: 1, fillOpacity: 0.05 }).addTo(map);
+
+    var stops = data.stops || [];
+    $('title').textContent = stops.length ? ('가까운 정류장 ' + stops.length + '곳 (가까운 순)') : '결과 없음';
+    $('hint').hidden = stops.length > 0;
+    if (!stops.length) { $('hint').textContent = '이 반경 안에는 해당 버스가 서는 정류장이 없어요. 반경을 넓혀 보세요.'; }
+
+    var bounds = L.latLngBounds([center]);
+    stops.forEach(function (s) {
+      var m = L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="pin"></div>', iconSize: [26, 26], iconAnchor: [13, 26] }) })
+        .bindPopup('<b>' + esc(s.name) + '</b><br>' + (s.no ? '정류장 번호 ' + esc(s.no) + '<br>' : '') + s.distance + 'm')
+        .addTo(stopLayer);
+      markers[s.nodeId] = m; bounds.extend([s.lat, s.lng]);
+
+      var li = document.createElement('li');
+      var b = document.createElement('button'); b.type = 'button';
+      b.innerHTML = '<span><span class="nm">' + esc(s.name) + '</span><br><span class="sub">' + (s.no ? '번호 ' + esc(s.no) : '번호 없음') + '</span></span><span class="dist">' + fmt(s.distance) + '</span>';
+      b.addEventListener('click', function () {
+        map.setView([s.lat, s.lng], 17); m.openPopup();
+        Array.prototype.forEach.call(document.querySelectorAll('li button.on'), function (x) { x.classList.remove('on'); });
+        b.classList.add('on');
+      });
+      li.appendChild(b); $('list').appendChild(li);
+      m.on('click', function () { b.scrollIntoView({ block: 'nearest' }); });
+    });
+    if (stops.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 17 });
+    else map.setView(center, 15);
+  }
+  function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function fmt(m) { return m >= 1000 ? (m / 1000).toFixed(1) + 'km' : m + 'm'; }
+
+  $('f').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var bus = $('bus').value.trim();
+    if (!bus) { notice('버스 번호를 입력하세요.', true); return; }
+    var radius = parseInt($('radius').value, 10);
+    $('go').disabled = true; $('go').textContent = '찾는 중…'; notice('');
+    var q = 'bus=' + encodeURIComponent(bus) + '&lat=' + center[0] + '&lng=' + center[1] + '&radius=' + radius;
+    fetch('/api/search?' + q).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.error) { notice(data.error, true); return; }
+      if (data.demo) notice('데모 모드: 아래 정류장은 샘플 데이터예요. .env에 TAGO_API_KEY를 넣으면 실제 정류장이 나와요.');
+      render(data, radius);
+    }).catch(function () {
+      notice('서버에 연결하지 못했어요. 터미널에서 node server.js 가 실행 중인지 확인하세요.', true);
+    }).then(function () { $('go').disabled = false; $('go').textContent = '찾기'; });
+  });
+
+  locate();
+})();
+</script>
+</body>
+</html>
