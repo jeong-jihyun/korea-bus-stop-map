@@ -292,7 +292,7 @@
         if (live !== cur) return; // 그 사이 다른 노선으로 바뀜
         busLayer.clearLayers();
         var st2 = $('livestat'); if (!st2) return;
-        if (data.error) { st2.textContent = '실시간 버스 위치를 불러오지 못했어요.'; st2.title = data.error; return; }
+        if (data.error) { st2.textContent = '실시간 버스 위치를 불러오지 못했어요. ' + (/활용신청|인증/.test(data.error) ? '(버스 위치 서비스 활용신청이 필요해요)' : ''); st2.title = data.error; return; }
         var list = data.buses || [];
         list.forEach(function (b) {
           var near = cur.stops.filter(function (s) { return (b.nodeId && s.nodeId === b.nodeId) || (b.order && s.order === b.order); })[0];
