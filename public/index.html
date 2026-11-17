@@ -29,6 +29,13 @@
   button.go { background: var(--signal); color: #fff; font-weight: 700; cursor: pointer; }
   button.go:disabled { opacity: .6; cursor: progress; }
   button.loc { background: transparent; color: #fff; border-color: #ffffff66; cursor: pointer; }
+  .route { width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 11px 16px; cursor: pointer; display: block; }
+  .route:hover { background: #eef4fb; }
+  .route .rn { font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; margin-right: 6px; }
+  .route .city { font-size: 12px; color: #fff; background: var(--signal); border-radius: 999px; padding: 2px 8px; margin-right: 6px; }
+  .route .dir { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .back { margin: 8px 16px; background: #fff; color: var(--signal); border: 1px solid var(--signal); cursor: pointer; font-weight: 700; padding: 6px 12px; }
+  .seq { display: inline-block; min-width: 26px; color: var(--muted); font-variant-numeric: tabular-nums; }
   button.near { background: #ffd43b; color: var(--ink); font-weight: 700; cursor: pointer; }
   button.near:disabled { opacity: .6; cursor: progress; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; border-bottom: 1px solid var(--line); }
@@ -63,6 +70,10 @@
 <header>
   <h1>버스 정류장 찾기</h1>
   <form id="f">
+    <select id="region" aria-label="검색 지역">
+      <option value="near">내 주변</option>
+      <option value="all">전국 전체</option>
+    </select>
     <input id="bus" inputmode="numeric" autocomplete="off" placeholder="버스 번호 (예: 102)" value="102" aria-label="버스 번호">
     <select id="radius" aria-label="검색 반경">
       <option value="500">반경 500m</option>
@@ -180,7 +191,7 @@
           var c = document.createElement('button'); c.type = 'button'; c.className = 'chip';
           c.textContent = r.routeNo; c.title = (r.type || '') + (r.from ? ' ' + r.from + ' → ' + r.to : '');
           c.addEventListener('click', function () {
-            $('bus').value = r.routeNo;
+            $('bus').value = r.routeNo; $('region').value = 'near';
             $('f').dispatchEvent(new Event('submit', { cancelable: true }));
           });
           row.appendChild(c);
@@ -208,6 +219,76 @@
       }).then(function () { $('near').disabled = false; $('near').textContent = '주변 버스 보기'; });
   });
 
+  // ---- 지역 선택 / 전국 검색 ----
+  fetch('/api/cities').then(function (r) { return r.json(); }).then(function (d) {
+    (d.cities || []).forEach(function (c) {
+      var o = document.createElement('option'); o.value = c.code; o.textContent = c.name; $('region').appendChild(o);
+    });
+  }).catch(function () { /* 지역 목록 없이도 '내 주변'·'전국 전체'는 동작 */ });
+
+  var lastRoutes = null;
+  function clearMap() {
+    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = '';
+    if (radiusCircle) { map.removeLayer(radiusCircle); radiusCircle = null; }
+  }
+  function searchRoutes(bus) {
+    var sel = $('region'); var city = sel.value;
+    var cityName = sel.options[sel.selectedIndex].textContent;
+    $('go').disabled = true; $('go').textContent = '찾는 중…'; notice('');
+    fetch('/api/routes?bus=' + encodeURIComponent(bus) + '&city=' + encodeURIComponent(city) + '&cityName=' + encodeURIComponent(cityName))
+      .then(function (r) { return r.json(); }).then(function (data) {
+        if (data.error) { notice(data.error, true); return; }
+        if (data.demo) notice('샘플 데이터예요. 서버에 공공데이터 인증키(TAGO_API_KEY)를 설정하면 실제 노선이 나와요.');
+        else if (data.failed) notice('일부 지역(' + data.failed + '곳)은 조회하지 못했어요. 결과가 빠졌을 수 있어요.', true);
+        lastRoutes = { bus: bus, data: data };
+        renderRoutes(bus, data);
+        if (data.routes.length === 1) showRoute(data.routes[0], false);
+      }).catch(function () {
+        notice('서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.', true);
+      }).then(function () { $('go').disabled = false; $('go').textContent = '찾기'; });
+  }
+  function renderRoutes(bus, data) {
+    clearMap();
+    var routes = data.routes || [];
+    $('title').textContent = routes.length ? (bus + '번 노선 ' + routes.length + '개 (' + data.searched + '개 지역 검색) · 눌러서 전체 정류장 보기') : '결과 없음';
+    $('hint').hidden = routes.length > 0;
+    if (!routes.length) $('hint').textContent = bus + '번 버스를 찾지 못했어요. 지역을 바꾸거나 "전국 전체"로 찾아 보세요.';
+    routes.forEach(function (r) {
+      var li = document.createElement('li');
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'route';
+      b.innerHTML = '<span class="rn">' + esc(r.routeNo) + '</span><span class="city">' + esc(r.cityName || r.cityCode) + '</span>' + esc(r.type || '') +
+        '<span class="dir">' + esc(r.from || '') + ' → ' + esc(r.to || '') + '</span>';
+      b.addEventListener('click', function () { showRoute(r, true); });
+      li.appendChild(b); $('list').appendChild(li);
+    });
+  }
+  function showRoute(r, canGoBack) {
+    notice('');
+    fetch('/api/route-stops?city=' + encodeURIComponent(r.cityCode) + '&routeId=' + encodeURIComponent(r.routeId))
+      .then(function (x) { return x.json(); }).then(function (data) {
+        if (data.error) { notice(data.error, true); return; }
+        clearMap();
+        var stops = data.stops || [];
+        $('title').textContent = r.routeNo + '번 · ' + (r.cityName || '') + ' · ' + (r.from || '') + ' → ' + (r.to || '') + ' · 정류장 ' + stops.length + '곳';
+        $('hint').hidden = true;
+        if (canGoBack && lastRoutes) {
+          var li0 = document.createElement('li'); var bk = document.createElement('button'); bk.type = 'button'; bk.className = 'back'; bk.textContent = '← 노선 목록으로';
+          bk.addEventListener('click', function () { renderRoutes(lastRoutes.bus, lastRoutes.data); }); li0.appendChild(bk); $('list').appendChild(li0);
+        }
+        var pts = [];
+        stops.forEach(function (s, i) {
+          pts.push([s.lat, s.lng]);
+          var m = L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="pin"></div>', iconSize: [26, 26], iconAnchor: [13, 26] }) })
+            .bindPopup('<b>' + esc(s.name) + '</b><br>' + (s.no ? '정류장 번호 ' + esc(s.no) + '<br>' : '') + (i + 1) + '번째 정류장').addTo(stopLayer);
+          var li = document.createElement('li'); var b = document.createElement('button'); b.type = 'button';
+          b.innerHTML = '<span><span class="seq">' + (i + 1) + '</span><span class="nm">' + esc(s.name) + '</span></span><span class="sub">' + (s.no ? '번호 ' + esc(s.no) : '') + '</span>';
+          b.addEventListener('click', function () { map.setView([s.lat, s.lng], 17); m.openPopup(); });
+          li.appendChild(b); $('list').appendChild(li);
+        });
+        if (pts.length) { L.polyline(pts, { color: '#0b6bcb', weight: 3, opacity: 0.6 }).addTo(stopLayer); map.fitBounds(pts, { padding: [30, 30] }); }
+      }).catch(function () { notice('정류장을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.', true); });
+  }
+
   function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function fmt(m) { return m >= 1000 ? (m / 1000).toFixed(1) + 'km' : m + 'm'; }
 
@@ -215,6 +296,7 @@
     e.preventDefault();
     var bus = $('bus').value.trim();
     if (!bus) { notice('버스 번호를 입력하세요.', true); return; }
+    if ($('region').value !== 'near') { searchRoutes(bus); return; }
     var radius = parseInt($('radius').value, 10);
     $('go').disabled = true; $('go').textContent = '찾는 중…'; notice('');
     var q = 'bus=' + encodeURIComponent(bus) + '&lat=' + center[0] + '&lng=' + center[1] + '&radius=' + radius;
