@@ -29,7 +29,16 @@
   input, select, button { font: inherit; border-radius: 6px; border: 1px solid transparent; padding: 9px 12px; }
   #bus { flex: 1 1 120px; min-width: 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
   select { background: #fff; color: var(--ink); }
-  #region { flex: 0 1 150px; min-width: 110px; background: #fff; color: var(--ink); }
+  #region { background: #fff; color: var(--ink); }
+  #regionwrap { position: relative; flex: 0 1 150px; min-width: 110px; }
+  #regionwrap #region { width: 100%; }
+  #regionbox { position: absolute; top: calc(100% + 4px); left: 0; width: max(100%, 220px); max-height: 46vh; overflow-y: auto; background: #fff; color: var(--ink); border-radius: 8px; box-shadow: 0 6px 20px #0006; z-index: 3000; }
+  #regionbox[hidden] { display: none; }
+  #regionbox li { padding: 11px 14px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 15px; }
+  #regionbox li:last-child { border-bottom: 0; }
+  #regionbox li.on, #regionbox li:hover { background: #eef4fb; }
+  #regionbox li.none { color: var(--muted); cursor: default; }
+  header { position: relative; z-index: 2000; }
   button.go { background: var(--signal); color: #fff; font-weight: 700; cursor: pointer; }
   button.go:disabled { opacity: .6; cursor: progress; }
   button.loc { background: transparent; color: #fff; border-color: #ffffff66; cursor: pointer; }
@@ -86,7 +95,7 @@
     /* 칸 크기를 화면 폭에 맞춰 나눠서(글자가 커져도) 오른쪽으로 삐져나가지 않게 */
     form { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; flex-basis: 100%; min-width: 0; width: 100%; align-items: stretch; }
     form > * { min-width: 0; width: 100%; }
-    #region { grid-column: span 5; }
+    #regionwrap { grid-column: span 5; }
     #bus { grid-column: span 3; font-size: 16px; text-align: center; }
     #radius { grid-column: span 4; }
     #go { grid-column: span 3; }
@@ -107,8 +116,10 @@
 <header>
   <h1>버스 정류장 찾기</h1>
   <form id="f">
-    <input id="region" list="regionlist" autocomplete="off" value="내 주변" placeholder="지역" aria-label="검색 지역 (입력하면 자동완성)">
-    <datalist id="regionlist"></datalist>
+    <div id="regionwrap">
+      <input id="region" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" value="내 주변" placeholder="지역" role="combobox" aria-expanded="false" aria-controls="regionbox" aria-label="검색 지역 (입력하면 자동완성)">
+      <ul id="regionbox" role="listbox" hidden></ul>
+    </div>
     <input id="bus" inputmode="numeric" autocomplete="off" placeholder="버스 번호 (예: 102)" value="102" aria-label="버스 번호">
     <select id="radius" aria-label="검색 반경">
       <option value="500">반경 500m</option>
@@ -172,6 +183,7 @@
   $('loc').addEventListener('click', locate);
 
   function render(data, radius) {
+    sbShow();
     stopLayer.clearLayers(); markers = {}; $('list').innerHTML = ''; if (typeof stopLive === 'function') stopLive();
     if (radiusCircle) map.removeLayer(radiusCircle);
     radiusCircle = L.circle(center, { radius: radius, color: '#0b6bcb', weight: 1, fillOpacity: 0.05 }).addTo(map);
@@ -203,6 +215,7 @@
     else map.setView(center, 15);
   }
   function renderNearby(data, radius) {
+    sbShow();
     stopLayer.clearLayers(); markers = {}; $('list').innerHTML = ''; if (typeof stopLive === 'function') stopLive();
     if (radiusCircle) map.removeLayer(radiusCircle);
     radiusCircle = L.circle(center, { radius: radius, color: '#0b6bcb', weight: 1, fillOpacity: 0.05 }).addTo(map);
@@ -257,20 +270,52 @@
   // ---- 지역 선택 / 전국 검색 ----
   // 지역 칸: 글자를 입력하면 자동완성 (내 주변 / 전국 전체 / 도시 목록)
   var REGIONS = [{ code: 'near', name: '내 주변' }, { code: 'all', name: '전국 전체' }];
-  function fillRegions() {
-    var dl = $('regionlist'); dl.innerHTML = '';
-    REGIONS.forEach(function (c) { var o = document.createElement('option'); o.value = c.name; dl.appendChild(o); });
+  var regionBox = $('regionbox'), regionIn = $('region'), regionPrev = '내 주변', hi = -1, shown = [];
+  function norm(t) { return String(t || '').replace(/\s+/g, ''); }
+  function showRegionList(filter) {
+    var t = norm(filter);
+    shown = REGIONS.filter(function (x) { return !t || norm(x.name).indexOf(t) >= 0; });
+    // 앞부분이 같은 이름을 위로
+    shown.sort(function (a, b) { return (norm(a.name).indexOf(t) === 0 ? 0 : 1) - (norm(b.name).indexOf(t) === 0 ? 0 : 1); });
+    regionBox.innerHTML = ''; hi = shown.length && t ? 0 : -1;
+    shown.forEach(function (c, k) {
+      var li = document.createElement('li'); li.textContent = c.name; li.setAttribute('role', 'option');
+      if (k === hi) li.className = 'on';
+      // 손가락으로 눌러도 입력칸이 먼저 닫히지 않도록 pointerdown 에서 바로 고름
+      li.addEventListener('pointerdown', function (e) { e.preventDefault(); pickRegion(c); });
+      regionBox.appendChild(li);
+    });
+    if (!shown.length) { var n = document.createElement('li'); n.className = 'none'; n.textContent = '맞는 지역이 없어요'; regionBox.appendChild(n); }
+    regionBox.hidden = false; regionIn.setAttribute('aria-expanded', 'true');
   }
-  fillRegions();
+  function hideRegionList() { regionBox.hidden = true; regionIn.setAttribute('aria-expanded', 'false'); hi = -1; }
+  function markHi() { Array.prototype.forEach.call(regionBox.children, function (li, k) { li.classList.toggle('on', k === hi); if (k === hi) li.scrollIntoView({ block: 'nearest' }); }); }
+  function pickRegion(c) { regionIn.value = c.name; regionPrev = c.name; hideRegionList(); }
   fetch('/api/cities').then(function (r) { return r.json(); }).then(function (d) {
     REGIONS = REGIONS.concat((d.cities || []).map(function (c) { return { code: c.code, name: c.name }; }));
-    fillRegions();
+    if (!regionBox.hidden) showRegionList(regionIn.value === regionPrev ? '' : regionIn.value);
   }).catch(function () { /* 지역 목록 없이도 '내 주변'·'전국 전체'는 동작 */ });
-  // 칸을 누르면 전체 목록이 보이도록 잠깐 비우고, 아무것도 안 고르면 원래 값으로 되돌림
-  var regionPrev = '내 주변';
-  $('region').addEventListener('focus', function () { regionPrev = this.value || regionPrev; this.value = ''; });
-  $('region').addEventListener('blur', function () { if (!this.value.trim()) this.value = regionPrev; });
-  function setRegion(code) { var r = REGIONS.filter(function (x) { return x.code === code; })[0]; $('region').value = r ? r.name : '내 주변'; regionPrev = $('region').value; }
+  // 칸을 누르면 현재 값이 전체 선택되고 목록이 펼쳐져요. 바로 타이핑하면 글자가 바뀌며 목록이 좁혀져요.
+  regionIn.addEventListener('focus', function () { regionPrev = regionIn.value || regionPrev; regionIn.placeholder = regionPrev; regionIn.value = ''; showRegionList(''); });
+  regionIn.addEventListener('input', function () { showRegionList(regionIn.value); });
+  regionIn.addEventListener('blur', function () { hideRegionList(); if (!regionIn.value.trim()) regionIn.value = regionPrev; regionIn.placeholder = '지역'; });
+  regionIn.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); if (regionBox.hidden) showRegionList(regionIn.value);
+      if (!shown.length) return; hi = (hi + (e.key === 'ArrowDown' ? 1 : -1) + shown.length) % shown.length; markHi();
+    } else if (e.key === 'Escape') { hideRegionList(); }
+    else if (e.key === 'Enter') {
+      // 엔터: 고른 항목(없으면 첫 후보)으로 정하고 바로 검색
+      e.preventDefault();
+      var t = norm(regionIn.value);
+      if (!t) { regionIn.value = regionPrev; hideRegionList(); }
+      else if (!regionBox.hidden && shown.length) pickRegion(shown[hi >= 0 ? hi : 0]);
+      else hideRegionList();
+      regionIn.blur();
+      $('f').dispatchEvent(new Event('submit', { cancelable: true }));
+    }
+  });
+  function setRegion(code) { var r = REGIONS.filter(function (x) { return x.code === code; })[0]; regionIn.value = r ? r.name : '내 주변'; regionPrev = regionIn.value; }
   // 입력한 글자를 지역으로 해석: 정확히 같음 → 한 곳만 겹침 → 여러 곳이면 안내
   function getRegion() {
     var t = $('region').value.trim().replace(/\s+/g, '');
@@ -309,6 +354,7 @@
       }).then(function () { $('go').disabled = false; $('go').textContent = '찾기'; });
   }
   function renderRoutes(bus, data) {
+    sbShow();
     clearMap();
     var routes = data.routes || [];
     $('title').textContent = routes.length ? (bus + '번 노선 ' + routes.length + '개 (' + data.searched + '개 지역 검색) · 눌러서 전체 정류장 보기') : '결과 없음';
@@ -423,6 +469,8 @@
     sbBtn.title = sbOff ? '정류장·노선 목록을 다시 보여요' : '목록을 접어 지도를 넓게 봐요';
     setTimeout(function () { map.invalidateSize(); }, 50);
   }
+  // 검색 결과(목록)가 나오면 접혀 있어도 자동으로 펼침 — 안 펼치면 '반응이 없는 것'처럼 보여서
+  function sbShow() { if (sbOff) { sbOff = false; try { localStorage.setItem('sbOff', '0'); } catch (e) {} sbRender(); } }
   var SbCtl = L.Control.extend({
     options: { position: 'topright' },
     onAdd: function () {
