@@ -30,6 +30,8 @@
   #bus { flex: 1 1 120px; min-width: 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
   select { background: #fff; color: var(--ink); }
   #region { background: #fff; color: var(--ink); }
+  /* 검색줄의 입력칸·선택칸·버튼 높이를 모두 같게 */
+  form input, form select, form button { height: 42px; line-height: 1.2; }
   #regionwrap { position: relative; flex: 0 1 150px; min-width: 110px; }
   #regionwrap #region { width: 100%; }
   #regionbox { position: absolute; top: calc(100% + 4px); left: 0; width: max(100%, 220px); max-height: 46vh; overflow-y: auto; background: #fff; color: var(--ink); border-radius: 8px; box-shadow: 0 6px 20px #0006; z-index: 3000; }
@@ -101,7 +103,8 @@
     #go { grid-column: span 3; }
     #near { grid-column: span 6; }
     #loc { grid-column: span 3; }
-    input, select, button { padding: 8px 6px; font-size: 14px; line-height: 1.2; }
+    input, select, button { padding: 0 8px; font-size: 14px; line-height: 1.2; }
+    form input, form select, form button { height: 40px; }
     button { white-space: nowrap; overflow: hidden; text-overflow: clip; }
     .notice { padding: 6px 10px; font-size: 12px; }
   }
