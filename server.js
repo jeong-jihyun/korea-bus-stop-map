@@ -13,7 +13,7 @@ try {
 } catch (e) { /* .env 없으면 데모 모드 */ }
 
 const core = require('./lib/core');
-const API = { '/api/search': core.handle, '/api/nearby': core.handleNearby, '/api/cities': core.handleCities, '/api/routes': core.handleRoutes, '/api/route-stops': core.handleRouteStops };
+const API = { '/api/search': core.handle, '/api/nearby': core.handleNearby, '/api/cities': core.handleCities, '/api/routes': core.handleRoutes, '/api/route-stops': core.handleRouteStops, '/api/buses': core.handleBuses };
 const PORT = process.env.PORT || 3000;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 

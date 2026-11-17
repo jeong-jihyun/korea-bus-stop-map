@@ -60,6 +60,15 @@
   .empty { padding: 16px; color: var(--muted); font-size: 14px; }
   .pin { width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--stop); border: 2px solid #fff; box-shadow: 0 1px 4px #0006; }
   .pin.me { background: var(--signal); border-radius: 50%; transform: none; }
+  .sd { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px #0007; }
+  .busicon { filter: drop-shadow(0 2px 3px #0008); }
+  li.legend { padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px; background: #fafaf7; }
+  li.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+  li.legend .sp { display: inline-block; width: 14px; }
+  .liverow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+  #livestat { font-weight: 700; }
+  #liverefresh { background: #fff; color: var(--signal); border: 1px solid var(--signal); font-weight: 700; padding: 4px 10px; cursor: pointer; }
+  li.dirhead { padding: 6px 16px; font-size: 12px; font-weight: 700; background: #eef0ea; border-left: 4px solid var(--line); }
   @media (min-width: 860px) {
     main { grid-template-rows: none; grid-template-columns: 1fr 340px; }
     aside { border-top: 0; border-left: 1px solid var(--line); }
@@ -92,7 +101,7 @@
   <aside>
     <h2 id="title">버스 번호를 모르면 "주변 버스 보기"를 누르세요</h2>
     <ul id="list"></ul>
-    <div class="empty" id="hint">지도를 클릭하면 그 지점이 검색 중심이 돼요. 서울 등 일부 지역은 공공 데이터에 정류장이 없을 수 있어요.</div>
+    <div class="empty" id="hint">지도를 클릭하면 그 지점이 검색 중심이 돼요. </div>
   </aside>
 </main>
 
@@ -137,7 +146,7 @@
   $('loc').addEventListener('click', locate);
 
   function render(data, radius) {
-    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = '';
+    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = ''; if (typeof stopLive === 'function') stopLive();
     if (radiusCircle) map.removeLayer(radiusCircle);
     radiusCircle = L.circle(center, { radius: radius, color: '#0b6bcb', weight: 1, fillOpacity: 0.05 }).addTo(map);
 
@@ -168,7 +177,7 @@
     else map.setView(center, 15);
   }
   function renderNearby(data, radius) {
-    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = '';
+    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = ''; if (typeof stopLive === 'function') stopLive();
     if (radiusCircle) map.removeLayer(radiusCircle);
     radiusCircle = L.circle(center, { radius: radius, color: '#0b6bcb', weight: 1, fillOpacity: 0.05 }).addTo(map);
     var stops = data.stops || [];
@@ -228,7 +237,7 @@
 
   var lastRoutes = null;
   function clearMap() {
-    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = '';
+    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = ''; if (typeof stopLive === 'function') stopLive();
     if (radiusCircle) { map.removeLayer(radiusCircle); radiusCircle = null; }
   }
   function searchRoutes(bus) {
@@ -262,9 +271,44 @@
       li.appendChild(b); $('list').appendChild(li);
     });
   }
+  // ---- 노선 보기: 방향별 색, 실시간 버스 위치 ----
+  var DIRC = ['#0b6bcb', '#d6336c']; // 0 정방향(파랑), 1 반대 방향(빨강)
+  var busLayer = L.layerGroup().addTo(map);
+  var live = null; // { r, stops, timer }
+  function stopLive() { if (live && live.timer) clearInterval(live.timer); live = null; busLayer.clearLayers(); }
+  function busIcon(color) {
+    var svg = '<svg viewBox="0 0 24 24" width="32" height="32"><rect x="3" y="2.5" width="18" height="16" rx="3.5" fill="' + color + '" stroke="#fff" stroke-width="1.6"/>' +
+      '<rect x="5.5" y="5" width="13" height="6.5" rx="1.2" fill="#fff"/><circle cx="8" cy="15" r="1.5" fill="#fff"/><circle cx="16" cy="15" r="1.5" fill="#fff"/>' +
+      '<rect x="5" y="18.5" width="3.4" height="3" rx="1" fill="#222"/><rect x="15.6" y="18.5" width="3.4" height="3" rx="1" fill="#222"/></svg>';
+    return L.divIcon({ className: 'busicon', html: svg, iconSize: [32, 32], iconAnchor: [16, 16], popupAnchor: [0, -14] });
+  }
+  function loadBuses(manual) {
+    if (!live) return;
+    var cur = live, r = cur.r;
+    var st = $('livestat'); if (manual && st) st.textContent = '버스 위치 불러오는 중…';
+    fetch('/api/buses?city=' + encodeURIComponent(r.cityCode) + '&routeId=' + encodeURIComponent(r.routeId))
+      .then(function (x) { return x.json(); }).then(function (data) {
+        if (live !== cur) return; // 그 사이 다른 노선으로 바뀜
+        busLayer.clearLayers();
+        var st2 = $('livestat'); if (!st2) return;
+        if (data.error) { st2.textContent = '실시간 버스 위치를 불러오지 못했어요.'; st2.title = data.error; return; }
+        var list = data.buses || [];
+        list.forEach(function (b) {
+          var near = cur.stops.filter(function (s) { return (b.nodeId && s.nodeId === b.nodeId) || (b.order && s.order === b.order); })[0];
+          var dir = near ? near.dir : 0;
+          var nm = b.nodeName || (near && near.name) || '';
+          L.marker([b.lat, b.lng], { icon: busIcon(DIRC[dir]), zIndexOffset: 1000 })
+            .bindPopup('<b>🚌 ' + esc(r.routeNo) + '번</b>' + (b.plate ? ' · ' + esc(b.plate) : '') + (nm ? '<br>' + (b.atStop ? esc(nm) + ' 정차 중' : esc(nm) + ' 지나는 중') : '') +
+              '<br>' + (dir ? '반대 방향' : '정방향') + (b.lowFloor ? ' · 저상' : '') + (b.full ? ' · 혼잡' : '')).addTo(busLayer);
+        });
+        var t = new Date();
+        st2.textContent = list.length ? ('지금 달리는 버스 ' + list.length + '대 · ' + t.toLocaleTimeString('ko-KR') + ' 기준') : '지금 운행 중인 버스가 없어요 (' + t.toLocaleTimeString('ko-KR') + ')';
+        st2.title = '';
+      }).catch(function () { var s3 = $('livestat'); if (s3) s3.textContent = '실시간 버스 위치를 불러오지 못했어요.'; });
+  }
   function showRoute(r, canGoBack) {
     notice('');
-    fetch('/api/route-stops?city=' + encodeURIComponent(r.cityCode) + '&routeId=' + encodeURIComponent(r.routeId))
+    fetch('/api/route-stops?v=2&city=' + encodeURIComponent(r.cityCode) + '&routeId=' + encodeURIComponent(r.routeId))
       .then(function (x) { return x.json(); }).then(function (data) {
         if (data.error) { notice(data.error, true); return; }
         clearMap();
@@ -275,17 +319,38 @@
           var li0 = document.createElement('li'); var bk = document.createElement('button'); bk.type = 'button'; bk.className = 'back'; bk.textContent = '← 노선 목록으로';
           bk.addEventListener('click', function () { renderRoutes(lastRoutes.bus, lastRoutes.data); }); li0.appendChild(bk); $('list').appendChild(li0);
         }
-        var pts = [];
+        // 방향 안내 + 실시간 버스 상태줄
+        var lastOf = [null, null];
+        stops.forEach(function (s) { lastOf[s.dir ? 1 : 0] = s; });
+        var hasTwo = !!lastOf[1];
+        var lg = document.createElement('li'); lg.className = 'legend';
+        lg.innerHTML = '<div><i style="background:' + DIRC[0] + '"></i>' + (hasTwo ? esc(lastOf[0].name) + ' 방면' : '정방향') + (hasTwo ? '<span class="sp"></span><i style="background:' + DIRC[1] + '"></i>' + esc(lastOf[1].name) + ' 방면 (반대 방향)' : '') + '</div>' +
+          '<div class="liverow"><span id="livestat">버스 위치 불러오는 중…</span><button type="button" id="liverefresh">새로고침</button></div>';
+        $('list').appendChild(lg);
+        $('liverefresh').addEventListener('click', function () { loadBuses(true); });
+
+        var pts = [], seg = [], segDir = 0, prevDir = null;
+        function flush() { if (seg.length > 1) L.polyline(seg, { color: DIRC[segDir], weight: 4, opacity: 0.75 }).addTo(stopLayer); }
         stops.forEach(function (s, i) {
+          var d = s.dir ? 1 : 0;
           pts.push([s.lat, s.lng]);
-          var m = L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="pin"></div>', iconSize: [26, 26], iconAnchor: [13, 26] }) })
-            .bindPopup('<b>' + esc(s.name) + '</b><br>' + (s.no ? '정류장 번호 ' + esc(s.no) + '<br>' : '') + (i + 1) + '번째 정류장').addTo(stopLayer);
-          var li = document.createElement('li'); var b = document.createElement('button'); b.type = 'button';
+          if (prevDir !== null && d !== prevDir) { flush(); seg = []; }
+          seg.push([s.lat, s.lng]); segDir = d; prevDir = d;
+          if (hasTwo && (i === 0 || stops[i - 1].dir !== s.dir)) {
+            var h = document.createElement('li'); h.className = 'dirhead'; h.style.borderLeftColor = DIRC[d];
+            h.textContent = (d ? '반대 방향' : '정방향') + ' · ' + (lastOf[d] ? lastOf[d].name + ' 방면' : ''); $('list').appendChild(h);
+          }
+          var m = L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="sd" style="background:' + DIRC[d] + '"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }) })
+            .bindPopup('<b>' + esc(s.name) + '</b><br>' + (s.no ? '정류장 번호 ' + esc(s.no) + '<br>' : '') + (i + 1) + '번째 정류장' + (hasTwo ? ' · ' + (d ? '반대 방향' : '정방향') : '')).addTo(stopLayer);
+          var li = document.createElement('li'); var b = document.createElement('button'); b.type = 'button'; b.style.borderLeft = '4px solid ' + DIRC[d];
           b.innerHTML = '<span><span class="seq">' + (i + 1) + '</span><span class="nm">' + esc(s.name) + '</span></span><span class="sub">' + (s.no ? '번호 ' + esc(s.no) : '') + '</span>';
           b.addEventListener('click', function () { map.setView([s.lat, s.lng], 17); m.openPopup(); });
           li.appendChild(b); $('list').appendChild(li);
         });
-        if (pts.length) { L.polyline(pts, { color: '#0b6bcb', weight: 3, opacity: 0.6 }).addTo(stopLayer); map.fitBounds(pts, { padding: [30, 30] }); }
+        flush();
+        if (pts.length) map.fitBounds(pts, { padding: [30, 30] });
+        live = { r: r, stops: stops, timer: setInterval(function () { if (!document.hidden) loadBuses(false); }, 15000) };
+        loadBuses(false);
       }).catch(function () { notice('정류장을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.', true); });
   }
 
