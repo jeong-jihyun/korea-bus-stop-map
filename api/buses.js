@@ -3,6 +3,6 @@ const { handleBuses } = require('../lib/core');
 
 module.exports = async (req, res) => {
   const [code, body] = await handleBuses(req.query || {});
-  if (code === 200 && !body.demo) res.setHeader('Cache-Control', 's-maxage=10, stale-while-revalidate=20');
+  if (code === 200 && !body.demo) res.setHeader('Cache-Control', 's-maxage=20, stale-while-revalidate=30');
   res.status(code).json(body);
 };

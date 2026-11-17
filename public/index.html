@@ -65,6 +65,7 @@
   li.legend { padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px; background: #fafaf7; }
   li.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
   li.legend .sp { display: inline-block; width: 14px; }
+  li.legend .guess { margin-top: 4px; font-size: 12px; color: var(--muted); }
   .liverow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
   #livestat { font-weight: 700; }
   #liverefresh { background: #fff; color: var(--signal); border: 1px solid var(--signal); font-weight: 700; padding: 4px 10px; cursor: pointer; }
@@ -297,7 +298,9 @@
           var near = cur.stops.filter(function (s) { return (b.nodeId && s.nodeId === b.nodeId) || (b.order && s.order === b.order); })[0];
           var dir = near ? near.dir : 0;
           var nm = b.nodeName || (near && near.name) || '';
-          L.marker([b.lat, b.lng], { icon: busIcon(DIRC[dir]), zIndexOffset: 1000 })
+          var pos = (b.lat != null && b.lng != null) ? [b.lat, b.lng] : (near ? [near.lat, near.lng] : null);
+          if (!pos) return;
+          L.marker(pos, { icon: busIcon(DIRC[dir]), zIndexOffset: 1000 })
             .bindPopup('<b>🚌 ' + esc(r.routeNo) + '번</b>' + (b.plate ? ' · ' + esc(b.plate) : '') + (nm ? '<br>' + (b.atStop ? esc(nm) + ' 정차 중' : esc(nm) + ' 지나는 중') : '') +
               '<br>' + (dir ? '반대 방향' : '정방향') + (b.lowFloor ? ' · 저상' : '') + (b.full ? ' · 혼잡' : '')).addTo(busLayer);
         });
@@ -324,7 +327,7 @@
         stops.forEach(function (s) { lastOf[s.dir ? 1 : 0] = s; });
         var hasTwo = !!lastOf[1];
         var lg = document.createElement('li'); lg.className = 'legend';
-        lg.innerHTML = '<div><i style="background:' + DIRC[0] + '"></i>' + (hasTwo ? esc(lastOf[0].name) + ' 방면' : '정방향') + (hasTwo ? '<span class="sp"></span><i style="background:' + DIRC[1] + '"></i>' + esc(lastOf[1].name) + ' 방면 (반대 방향)' : '') + '</div>' +
+        lg.innerHTML = '<div><i style="background:' + DIRC[0] + '"></i>' + (hasTwo ? esc(lastOf[0].name) + ' 방면' : '정방향') + (hasTwo ? '<span class="sp"></span><i style="background:' + DIRC[1] + '"></i>' + esc(lastOf[1].name) + ' 방면 (반대 방향)' : '') + (data.dirGuess ? '<div class="guess">방향은 정류장 순서로 나눈 추정이에요. 실제와 조금 다를 수 있어요.</div>' : '') + '</div>' +
           '<div class="liverow"><span id="livestat">버스 위치 불러오는 중…</span><button type="button" id="liverefresh">새로고침</button></div>';
         $('list').appendChild(lg);
         $('liverefresh').addEventListener('click', function () { loadBuses(true); });
@@ -349,7 +352,7 @@
         });
         flush();
         if (pts.length) map.fitBounds(pts, { padding: [30, 30] });
-        live = { r: r, stops: stops, timer: setInterval(function () { if (!document.hidden) loadBuses(false); }, 15000) };
+        live = { r: r, stops: stops, timer: setInterval(function () { if (!document.hidden) loadBuses(false); }, 30000) };
         loadBuses(false);
       }).catch(function () { notice('정류장을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.', true); });
   }
