@@ -29,6 +29,13 @@
   button.go { background: var(--signal); color: #fff; font-weight: 700; cursor: pointer; }
   button.go:disabled { opacity: .6; cursor: progress; }
   button.loc { background: transparent; color: #fff; border-color: #ffffff66; cursor: pointer; }
+  button.near { background: #ffd43b; color: var(--ink); font-weight: 700; cursor: pointer; }
+  button.near:disabled { opacity: .6; cursor: progress; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; border-bottom: 1px solid var(--line); }
+  .chip { border: 1px solid var(--signal); background: #fff; color: var(--signal); font-weight: 700; padding: 4px 10px; border-radius: 999px; cursor: pointer; font-variant-numeric: tabular-nums; }
+  .chip:hover { background: var(--signal); color: #fff; }
+  .nobus { padding: 0 16px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  li.stop > button { border-bottom: 0; padding-bottom: 6px; }
   :focus-visible { outline: 3px solid #ffd43b; outline-offset: 2px; }
   .notice { padding: 8px 16px; font-size: 13px; background: #fff3bf; color: #5c4400; }
   .notice[hidden] { display: none; }
@@ -64,6 +71,7 @@
       <option value="3000">반경 3km</option>
     </select>
     <button class="go" id="go" type="submit">찾기</button>
+    <button class="near" id="near" type="button">주변 버스 보기</button>
     <button class="loc" id="loc" type="button">내 위치</button>
   </form>
 </header>
@@ -71,7 +79,7 @@
 <main>
   <div id="map" role="application" aria-label="지도"></div>
   <aside>
-    <h2 id="title">버스 번호를 입력하고 찾기를 누르세요</h2>
+    <h2 id="title">버스 번호를 모르면 "주변 버스 보기"를 누르세요</h2>
     <ul id="list"></ul>
     <div class="empty" id="hint">지도를 클릭하면 그 지점이 검색 중심이 돼요. 서울 등 일부 지역은 공공 데이터에 정류장이 없을 수 있어요.</div>
   </aside>
@@ -148,6 +156,58 @@
     if (stops.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 17 });
     else map.setView(center, 15);
   }
+  function renderNearby(data, radius) {
+    stopLayer.clearLayers(); markers = {}; $('list').innerHTML = '';
+    if (radiusCircle) map.removeLayer(radiusCircle);
+    radiusCircle = L.circle(center, { radius: radius, color: '#0b6bcb', weight: 1, fillOpacity: 0.05 }).addTo(map);
+    var stops = data.stops || [];
+    $('title').textContent = '주변 정류장 ' + stops.length + '곳 · 버스 번호를 누르면 그 버스가 서는 정류장을 보여줘요';
+    $('hint').hidden = true;
+    var bounds = L.latLngBounds([center]);
+    stops.forEach(function (s) {
+      var m = L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="pin"></div>', iconSize: [26, 26], iconAnchor: [13, 26] }) })
+        .bindPopup('<b>' + esc(s.name) + '</b><br>' + (s.no ? '정류장 번호 ' + esc(s.no) + '<br>' : '') + s.distance + 'm')
+        .addTo(stopLayer);
+      bounds.extend([s.lat, s.lng]);
+      var li = document.createElement('li'); li.className = 'stop';
+      var b = document.createElement('button'); b.type = 'button';
+      b.innerHTML = '<span><span class="nm">' + esc(s.name) + '</span><br><span class="sub">' + (s.no ? '번호 ' + esc(s.no) : '번호 없음') + '</span></span><span class="dist">' + fmt(s.distance) + '</span>';
+      b.addEventListener('click', function () { map.setView([s.lat, s.lng], 17); m.openPopup(); });
+      li.appendChild(b);
+      if (s.routes && s.routes.length) {
+        var row = document.createElement('div'); row.className = 'chips';
+        s.routes.forEach(function (r) {
+          var c = document.createElement('button'); c.type = 'button'; c.className = 'chip';
+          c.textContent = r.routeNo; c.title = (r.type || '') + (r.from ? ' ' + r.from + ' → ' + r.to : '');
+          c.addEventListener('click', function () {
+            $('bus').value = r.routeNo;
+            $('f').dispatchEvent(new Event('submit', { cancelable: true }));
+          });
+          row.appendChild(c);
+        });
+        li.appendChild(row);
+      } else {
+        var nb = document.createElement('div'); nb.className = 'nobus'; nb.textContent = '서는 버스 정보를 가져오지 못했어요'; li.appendChild(nb);
+      }
+      $('list').appendChild(li);
+    });
+    map.fitBounds(bounds, { padding: [30, 30], maxZoom: 17 });
+  }
+
+  $('near').addEventListener('click', function () {
+    var radius = parseInt($('radius').value, 10);
+    $('near').disabled = true; $('near').textContent = '찾는 중…'; notice('');
+    fetch('/api/nearby?lat=' + center[0] + '&lng=' + center[1] + '&radius=' + radius)
+      .then(function (r) { return r.json(); }).then(function (data) {
+        if (data.error) { notice(data.error, true); return; }
+        if (data.demo) notice('샘플 데이터예요. 서버에 공공데이터 인증키(TAGO_API_KEY)를 설정하면 실제 정류장이 나와요.');
+        else if (data.routesError) notice('정류장은 찾았지만 서는 버스 번호를 가져오지 못했어요. (' + data.routesError + ')', true);
+        renderNearby(data, radius);
+      }).catch(function () {
+        notice('서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.', true);
+      }).then(function () { $('near').disabled = false; $('near').textContent = '주변 버스 보기'; });
+  });
+
   function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function fmt(m) { return m >= 1000 ? (m / 1000).toFixed(1) + 'km' : m + 'm'; }
 

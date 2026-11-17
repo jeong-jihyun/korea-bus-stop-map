@@ -12,14 +12,15 @@ try {
   });
 } catch (e) { /* .env 없으면 데모 모드 */ }
 
-const { handle } = require('./lib/core');
+const { handle, handleNearby } = require('./lib/core');
 const PORT = process.env.PORT || 3000;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
-  if (u.pathname === '/api/search') {
-    const [code, body] = await handle(Object.fromEntries(u.searchParams));
+  if (u.pathname === '/api/search' || u.pathname === '/api/nearby') {
+    const fn = u.pathname === '/api/nearby' ? handleNearby : handle;
+    const [code, body] = await fn(Object.fromEntries(u.searchParams));
     res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify(body));
   }
