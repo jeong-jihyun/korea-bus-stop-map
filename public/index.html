@@ -56,7 +56,7 @@
 <header>
   <h1>버스 정류장 찾기</h1>
   <form id="f">
-    <input id="bus" inputmode="numeric" autocomplete="off" placeholder="버스 번호 (예: 472)" value="472" aria-label="버스 번호">
+    <input id="bus" inputmode="numeric" autocomplete="off" placeholder="버스 번호 (예: 102)" value="102" aria-label="버스 번호">
     <select id="radius" aria-label="검색 반경">
       <option value="500">반경 500m</option>
       <option value="1000" selected>반경 1km</option>
@@ -73,14 +73,14 @@
   <aside>
     <h2 id="title">버스 번호를 입력하고 찾기를 누르세요</h2>
     <ul id="list"></ul>
-    <div class="empty" id="hint">지도를 클릭하면 그 지점이 검색 중심이 돼요.</div>
+    <div class="empty" id="hint">지도를 클릭하면 그 지점이 검색 중심이 돼요. 서울 등 일부 지역은 공공 데이터에 정류장이 없을 수 있어요.</div>
   </aside>
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function () {
-  var CITY_HALL = [37.5665, 126.9780];
+  var CITY_HALL = [36.3504, 127.3845]; // 대전시청 (실제 데이터 확인된 지역)
   var center = CITY_HALL.slice();
 
   var map = L.map('map').setView(center, 15);
@@ -112,7 +112,7 @@
     navigator.geolocation.getCurrentPosition(function (p) {
       setCenter([p.coords.latitude, p.coords.longitude], true); notice('');
     }, function () {
-      notice('위치 권한이 없어서 서울시청 기준으로 보여드려요. 지도를 클릭해 위치를 바꿀 수 있어요.', true);
+      notice('위치 권한이 없어서 대전시청 기준으로 보여드려요. 지도를 클릭해 위치를 바꿀 수 있어요.', true);
     }, { enableHighAccuracy: true, timeout: 8000 });
   }
   $('loc').addEventListener('click', locate);
@@ -160,10 +160,10 @@
     var q = 'bus=' + encodeURIComponent(bus) + '&lat=' + center[0] + '&lng=' + center[1] + '&radius=' + radius;
     fetch('/api/search?' + q).then(function (r) { return r.json(); }).then(function (data) {
       if (data.error) { notice(data.error, true); return; }
-      if (data.demo) notice('데모 모드: 아래 정류장은 샘플 데이터예요. .env에 TAGO_API_KEY를 넣으면 실제 정류장이 나와요.');
+      if (data.demo) notice('샘플 데이터예요. 서버에 공공데이터 인증키(TAGO_API_KEY)를 설정하면 실제 정류장이 나와요.');
       render(data, radius);
     }).catch(function () {
-      notice('서버에 연결하지 못했어요. 터미널에서 node server.js 가 실행 중인지 확인하세요.', true);
+      notice('서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.', true);
     }).then(function () { $('go').disabled = false; $('go').textContent = '찾기'; });
   });
 
