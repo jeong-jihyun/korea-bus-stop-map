@@ -26,6 +26,7 @@
   input, select, button { font: inherit; border-radius: 6px; border: 1px solid transparent; padding: 9px 12px; }
   #bus { flex: 1 1 120px; min-width: 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
   select { background: #fff; color: var(--ink); }
+  #region { flex: 0 1 150px; min-width: 110px; background: #fff; color: var(--ink); }
   button.go { background: var(--signal); color: #fff; font-weight: 700; cursor: pointer; }
   button.go:disabled { opacity: .6; cursor: progress; }
   button.loc { background: transparent; color: #fff; border-color: #ffffff66; cursor: pointer; }
@@ -80,10 +81,8 @@
 <header>
   <h1>버스 정류장 찾기</h1>
   <form id="f">
-    <select id="region" aria-label="검색 지역">
-      <option value="near">내 주변</option>
-      <option value="all">전국 전체</option>
-    </select>
+    <input id="region" list="regionlist" autocomplete="off" value="내 주변" placeholder="지역 (예: 서울, 성남)" aria-label="검색 지역 (입력하면 자동완성)">
+    <datalist id="regionlist"></datalist>
     <input id="bus" inputmode="numeric" autocomplete="off" placeholder="버스 번호 (예: 102)" value="102" aria-label="버스 번호">
     <select id="radius" aria-label="검색 반경">
       <option value="500">반경 500m</option>
@@ -201,7 +200,7 @@
           var c = document.createElement('button'); c.type = 'button'; c.className = 'chip';
           c.textContent = r.routeNo; c.title = (r.type || '') + (r.from ? ' ' + r.from + ' → ' + r.to : '');
           c.addEventListener('click', function () {
-            $('bus').value = r.routeNo; $('region').value = 'near';
+            $('bus').value = r.routeNo; setRegion('near');
             $('f').dispatchEvent(new Event('submit', { cancelable: true }));
           });
           row.appendChild(c);
@@ -230,11 +229,38 @@
   });
 
   // ---- 지역 선택 / 전국 검색 ----
+  // 지역 칸: 글자를 입력하면 자동완성 (내 주변 / 전국 전체 / 도시 목록)
+  var REGIONS = [{ code: 'near', name: '내 주변' }, { code: 'all', name: '전국 전체' }];
+  function fillRegions() {
+    var dl = $('regionlist'); dl.innerHTML = '';
+    REGIONS.forEach(function (c) { var o = document.createElement('option'); o.value = c.name; dl.appendChild(o); });
+  }
+  fillRegions();
   fetch('/api/cities').then(function (r) { return r.json(); }).then(function (d) {
-    (d.cities || []).forEach(function (c) {
-      var o = document.createElement('option'); o.value = c.code; o.textContent = c.name; $('region').appendChild(o);
-    });
+    REGIONS = REGIONS.concat((d.cities || []).map(function (c) { return { code: c.code, name: c.name }; }));
+    fillRegions();
   }).catch(function () { /* 지역 목록 없이도 '내 주변'·'전국 전체'는 동작 */ });
+  // 칸을 누르면 전체 목록이 보이도록 잠깐 비우고, 아무것도 안 고르면 원래 값으로 되돌림
+  var regionPrev = '내 주변';
+  $('region').addEventListener('focus', function () { regionPrev = this.value || regionPrev; this.value = ''; });
+  $('region').addEventListener('blur', function () { if (!this.value.trim()) this.value = regionPrev; });
+  function setRegion(code) { var r = REGIONS.filter(function (x) { return x.code === code; })[0]; $('region').value = r ? r.name : '내 주변'; regionPrev = $('region').value; }
+  // 입력한 글자를 지역으로 해석: 정확히 같음 → 한 곳만 겹침 → 여러 곳이면 안내
+  function getRegion() {
+    var t = $('region').value.trim().replace(/\s+/g, '');
+    if (!t) return REGIONS[0];
+    var exact = REGIONS.filter(function (x) { return x.name.replace(/\s+/g, '') === t; })[0];
+    if (exact) return exact;
+    var part = REGIONS.filter(function (x) { return x.name.replace(/\s+/g, '').indexOf(t) >= 0; });
+    if (part.length === 1) { $('region').value = part[0].name; return part[0]; }
+    if (part.length > 1) {
+      // '서울'처럼 앞부분이 같은 이름이 하나뿐이면 그걸 사용
+      var starts = part.filter(function (x) { return x.name.replace(/\s+/g, '').indexOf(t) === 0; });
+      if (starts.length === 1) { $('region').value = starts[0].name; return starts[0]; }
+      return { ambiguous: part.slice(0, 6).map(function (x) { return x.name; }) };
+    }
+    return null;
+  }
 
   var lastRoutes = null;
   function clearMap() {
@@ -242,8 +268,7 @@
     if (radiusCircle) { map.removeLayer(radiusCircle); radiusCircle = null; }
   }
   function searchRoutes(bus) {
-    var sel = $('region'); var city = sel.value;
-    var cityName = sel.options[sel.selectedIndex].textContent;
+    var rg = getRegion(); var city = rg.code; var cityName = rg.name;
     $('go').disabled = true; $('go').textContent = '찾는 중…'; notice('');
     fetch('/api/routes?bus=' + encodeURIComponent(bus) + '&city=' + encodeURIComponent(city) + '&cityName=' + encodeURIComponent(cityName))
       .then(function (r) { return r.json(); }).then(function (data) {
@@ -364,7 +389,10 @@
     e.preventDefault();
     var bus = $('bus').value.trim();
     if (!bus) { notice('버스 번호를 입력하세요.', true); return; }
-    if ($('region').value !== 'near') { searchRoutes(bus); return; }
+    var rg = getRegion();
+    if (!rg) { notice('"' + $('region').value + '" 지역을 찾지 못했어요. 목록에 나오는 이름(예: 서울특별시, 성남시)으로 입력해 주세요.', true); return; }
+    if (rg.ambiguous) { notice('여러 지역이 겹쳐요: ' + rg.ambiguous.join(', ') + ' — 목록에서 골라 주세요.', true); return; }
+    if (rg.code !== 'near') { searchRoutes(bus); return; }
     var radius = parseInt($('radius').value, 10);
     $('go').disabled = true; $('go').textContent = '찾는 중…'; notice('');
     var q = 'bus=' + encodeURIComponent(bus) + '&lat=' + center[0] + '&lng=' + center[1] + '&radius=' + radius;
