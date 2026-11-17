@@ -281,8 +281,8 @@
     shown.forEach(function (c, k) {
       var li = document.createElement('li'); li.textContent = c.name; li.setAttribute('role', 'option');
       if (k === hi) li.className = 'on';
-      // 손가락으로 눌러도 입력칸이 먼저 닫히지 않도록 pointerdown 에서 바로 고름
-      li.addEventListener('pointerdown', function (e) { e.preventDefault(); pickRegion(c); });
+      li.addEventListener('mousedown', function (e) { e.preventDefault(); }); // 입력칸이 먼저 닫히지 않게
+      li.addEventListener('click', function () { pickRegion(c); regionIn.blur(); });
       regionBox.appendChild(li);
     });
     if (!shown.length) { var n = document.createElement('li'); n.className = 'none'; n.textContent = '맞는 지역이 없어요'; regionBox.appendChild(n); }
@@ -299,21 +299,29 @@
   regionIn.addEventListener('focus', function () { regionPrev = regionIn.value || regionPrev; regionIn.placeholder = regionPrev; regionIn.value = ''; showRegionList(''); });
   regionIn.addEventListener('input', function () { showRegionList(regionIn.value); });
   regionIn.addEventListener('blur', function () { hideRegionList(); if (!regionIn.value.trim()) regionIn.value = regionPrev; regionIn.placeholder = '지역'; });
+  var lastEnter = 0;
+  function regionEnter() {
+    lastEnter = Date.now();
+    var t = norm(regionIn.value);
+    if (!t) { regionIn.value = regionPrev; hideRegionList(); }
+    else if (!regionBox.hidden && shown.length) pickRegion(shown[hi >= 0 ? hi : 0]);
+    else hideRegionList();
+    regionIn.blur();
+    $('f').dispatchEvent(new Event('submit', { cancelable: true }));
+  }
   regionIn.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault(); if (regionBox.hidden) showRegionList(regionIn.value);
       if (!shown.length) return; hi = (hi + (e.key === 'ArrowDown' ? 1 : -1) + shown.length) % shown.length; markHi();
     } else if (e.key === 'Escape') { hideRegionList(); }
     else if (e.key === 'Enter') {
-      // 엔터: 고른 항목(없으면 첫 후보)으로 정하고 바로 검색
       e.preventDefault();
-      var t = norm(regionIn.value);
-      if (!t) { regionIn.value = regionPrev; hideRegionList(); }
-      else if (!regionBox.hidden && shown.length) pickRegion(shown[hi >= 0 ? hi : 0]);
-      else hideRegionList();
-      regionIn.blur();
-      $('f').dispatchEvent(new Event('submit', { cancelable: true }));
+      // 한글을 치는 중에는 엔터가 '글자 확정'으로만 쓰여 여기로 안 올 수 있어요 → 아래 keyup 에서 처리
+      if (!e.isComposing && e.keyCode !== 229) regionEnter();
     }
+  });
+  regionIn.addEventListener('keyup', function (e) {
+    if (e.key === 'Enter' && Date.now() - lastEnter > 600) regionEnter();
   });
   function setRegion(code) { var r = REGIONS.filter(function (x) { return x.code === code; })[0]; regionIn.value = r ? r.name : '내 주변'; regionPrev = regionIn.value; }
   // 입력한 글자를 지역으로 해석: 정확히 같음 → 한 곳만 겹침 → 여러 곳이면 안내
