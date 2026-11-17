@@ -84,13 +84,16 @@
     header { padding: 8px 10px; gap: 0; }
     header h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } /* 화면에서는 숨기고 스크린리더용으로만 */
     /* 칸 크기를 화면 폭에 맞춰 나눠서(글자가 커져도) 오른쪽으로 삐져나가지 않게 */
-    form { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.1fr); gap: 6px; flex-basis: 100%; min-width: 0; width: 100%; }
+    form { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; flex-basis: 100%; min-width: 0; width: 100%; align-items: stretch; }
     form > * { min-width: 0; width: 100%; }
-    #near { grid-column: 2; }
-    input, select, button { padding: 7px 8px; font-size: 14px; }
-    #bus { font-size: 16px; }
-    #region, #radius { flex: none; }
-    button.loc { grid-column: 3; padding-left: 4px; padding-right: 4px; }
+    #region { grid-column: span 5; }
+    #bus { grid-column: span 3; font-size: 16px; text-align: center; }
+    #radius { grid-column: span 4; }
+    #go { grid-column: span 3; }
+    #near { grid-column: span 6; }
+    #loc { grid-column: span 3; }
+    input, select, button { padding: 8px 6px; font-size: 14px; line-height: 1.2; }
+    button { white-space: nowrap; overflow: hidden; text-overflow: clip; }
     .notice { padding: 6px 10px; font-size: 12px; }
   }
   @media (min-width: 860px) { main.sb-off { grid-template-rows: none; grid-template-columns: 1fr 0; } }
@@ -104,7 +107,7 @@
 <header>
   <h1>버스 정류장 찾기</h1>
   <form id="f">
-    <input id="region" list="regionlist" autocomplete="off" value="내 주변" placeholder="지역 (예: 서울, 성남)" aria-label="검색 지역 (입력하면 자동완성)">
+    <input id="region" list="regionlist" autocomplete="off" value="내 주변" placeholder="지역" aria-label="검색 지역 (입력하면 자동완성)">
     <datalist id="regionlist"></datalist>
     <input id="bus" inputmode="numeric" autocomplete="off" placeholder="버스 번호 (예: 102)" value="102" aria-label="버스 번호">
     <select id="radius" aria-label="검색 반경">
